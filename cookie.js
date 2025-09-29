@@ -81,10 +81,10 @@ function isEEAVisitor() {
 
 const config = {
     // Domain restriction
-    allowedDomains: ['anabolen.org'],
+    allowedDomains: ['dev-trackingproguru.pantheonsite.io'],
     
     // Privacy policy URL (configurable)
-    privacyPolicyUrl: 'https://anabolen.org/#privacy-policy', // Add your full privacy policy URL here
+    privacyPolicyUrl: 'https://dev-trackingproguru.pantheonsite.io/about/, // Add your full privacy policy URL here
 
 
 
