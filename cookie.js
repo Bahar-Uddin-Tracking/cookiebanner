@@ -70,8 +70,13 @@ const EU_COUNTRIES = [
 
 // Function to check if visitor is from EEA/UK/CH
 // Single consolidated function to check if visitor is from EEA/UK/CH
-function isEEAVisitor() {
-    if (!locationData || !locationData.country) return true; // Default to requiring consent if unknown
+async function isEEAVisitor() {
+    // Ensure locationData is available. If not, fetch it.
+    if (!locationData || !locationData.country) {
+        await fetchLocationData(); // Wait for location data to be fetched
+    }
+    // If still no country data, default to requiring consent
+    if (!locationData || !locationData.country) return true;
     return EU_COUNTRIES.includes(locationData.country);
 }
 
@@ -84,7 +89,7 @@ const config = {
     allowedDomains: ['dev-trackingproguru.pantheonsite.io'],
     
     // Privacy policy URL (configurable)
-    privacyPolicyUrl: 'https://dev-trackingproguru.pantheonsite.io/about/, // Add your full privacy policy URL here
+    privacyPolicyUrl: 'https://dev-trackingproguru.pantheonsite.io/about/', // Add your full privacy policy URL here
 
 
 
@@ -3697,8 +3702,18 @@ function shouldShowBanner() {
     return true;
 }
 
+document.addEventListener("DOMContentLoaded", async function() {
+    // Fetch location data first
+    await fetchLocationData();
+
+    // Then initialize cookie consent
+    const detectedCookies = scanAndCategorizeCookies();
+    const userLanguage = detectUserLanguage(locationData);
+    await initializeCookieConsent(detectedCookies, userLanguage);
+});
+
 // Main initialization function
-function initializeCookieConsent(detectedCookies, language) {
+async function initializeCookieConsent(detectedCookies, language) {
 
    // NEW: Check if we should show on this URL
     if (!shouldShowOnCurrentUrl()) {
@@ -3726,6 +3741,7 @@ function initializeCookieConsent(detectedCookies, language) {
         const consentData = JSON.parse(consentGiven);
         updateConsentMode(consentData);
         loadCookiesAccordingToConsent(consentData);
+        await initializeClarity(consentData.categories.analytics); // Await Clarity initialization
         if (config.behavior.showFloatingButton) {
             showFloatingButton();
         }
@@ -3735,58 +3751,12 @@ function initializeCookieConsent(detectedCookies, language) {
 
     // Microsoft Clarity initialization
 // Microsoft Clarity initialization - UPDATED FOR COMPLIANCE
-function initializeClarity(consentGranted) {
-    if (!config.clarityConfig.enabled) return;
-    
-    const consentRequired = isEEAVisitor();
-    
-    // If we don't need consent or it's granted, load Clarity
-    if (consentGranted || !consentRequired) {
-        // Only load if not already loaded
-        if (typeof window.clarity === 'undefined') {
-            (function(c,l,a,r,i,t,y){
-                c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-                t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-                y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-            })(window, document, "clarity", "script", config.clarityConfig.projectId);
-        }
-        
-        // Send consent signal
-        ensureClarityConsentSignal(consentGranted);
-    } else if (config.clarityConfig.loadBeforeConsent === false) {
-        // Ensure Clarity doesn't load if consent not given and not allowed to load before consent
-        window.clarity = window.clarity || function() {
-            // Store calls in queue but don't execute them
-            (window.clarity.q = window.clarity.q || []).push(arguments);
-        };
-        window.clarity('consent', false);
-    }
-}
+
 
 
 
 // Function to send consent signal to Microsoft Clarity
-function sendClarityConsentSignal(consentGranted) {
-    if (!config.clarityConfig.enabled || !config.clarityConfig.sendConsentSignal) return;
-    
-    try {
-        if (typeof window.clarity !== 'undefined') {
-            // Send consent signal to Clarity
-            window.clarity('consent', consentGranted);
-            console.log('Microsoft Clarity consent signal sent:', consentGranted);
-            
-            // Push to dataLayer for tracking
-            window.dataLayer.push({
-                'event': 'clarity_consent_signal',
-                'clarity_consent': consentGranted,
-                'timestamp': new Date().toISOString(),
-                'location_data': locationData
-            });
-        }
-    } catch (error) {
-        console.error('Failed to send Clarity consent signal:', error);
-    }
-}
+
     
     // Explicitly apply the default language from config
     changeLanguage(config.languageConfig.defaultLanguage);
@@ -4052,11 +4022,9 @@ function hideFloatingButton() {
 }
 
 // Cookie consent functions
-function acceptAllCookies() {
+async function acceptAllCookies() {
 
-     // Add this line to initialize Clarity
-    initializeClarity(true);
-  sendClarityConsentSignal(true); // Add this line
+    await initializeClarity(true);
     
     const consentData = {
         status: 'accepted',
@@ -4102,11 +4070,8 @@ function acceptAllCookies() {
     });
 }
 
-function rejectAllCookies() {
-
-    // Add this line to ensure Clarity isn't loaded
-    initializeClarity(false);
-    sendClarityConsentSignal(false); // Add this line
+async function rejectAllCookies() {
+    await initializeClarity(false);
     
     const consentData = {
         status: 'rejected',
@@ -4148,12 +4113,10 @@ function rejectAllCookies() {
         'location_data': locationData
     });
 }
-
-function saveCustomSettings() {
-    const analyticsChecked = document.querySelector('input[data-category="analytics"]').checked;
-     // Initialize or stop Clarity based on consent
-    initializeClarity(analyticsChecked);
-    sendClarityConsentSignal(analyticsChecked); // Add this line
+async function saveCustomSettings() {
+    const analyticsChecked = document.querySelector(\'input[data-category="analytics"]\').checked;
+    // Initialize or stop Clarity based on consent
+    await initializeClarity(analyticsChecked);
     const advertisingChecked = document.querySelector('input[data-category="advertising"]').checked;
     
     // Restore stored query parameters when saving custom settings
@@ -4380,49 +4343,33 @@ function loadCookiesAccordingToConsent(consentData) {
 }
 
 // Add this function to check if visitor is from EEA/UK/CH
-function isClarityConsentRequired() {
-    if (!config.clarityConfig.autoDetectRegion) return true;
-    
-    // Use your existing locationData
-    if (locationData && locationData.country) {
-        // EEA + UK + Switzerland - regions that require consent for Clarity
-        const clarityRegions = EU_COUNTRIES; // Use the same list as everywhere else
-        return clarityRegions.includes(locationData.country);
-    }
-    
-    // If we can't determine location, require consent to be safe
-    return true;
-}
 
-function initializeClarity(consentGranted) {
+
+async function initializeClarity(consentGranted) {
     if (!config.clarityConfig.enabled) return;
     
-    const consentRequired = isClarityConsentRequired();
+    const consentRequired = await isEEAVisitor(); // Await the async function
     
-    // If we don't need consent or it's granted, load Clarity
+    // If we don\'t need consent or it\'s granted, load Clarity
     if (consentGranted || !consentRequired) {
         // Only load if not already loaded
-        if (typeof window.clarity === 'undefined') {
+        if (typeof window.clarity === \'undefined\') {
             (function(c,l,a,r,i,t,y){
                 c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-                t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+                t=l.createElement(r);t.async=1;t.src=\"https://www.clarity.ms/tag/\"+i;
                 y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-            })(window, document, "clarity", "script", config.clarityConfig.projectId);
+            })(window, document, \"clarity\", \"script\", config.clarityConfig.projectId);
         }
         
-        // Send consent signal after a brief delay to ensure Clarity is loaded
-        setTimeout(() => {
-            if (typeof window.clarity === 'function') {
-                window.clarity('consent', consentGranted);
-            }
-        }, 500);
+        // Send consent signal immediately after loading or if already loaded
+        sendClarityConsentSignal(consentGranted);
     } else {
-        // Ensure Clarity doesn't load if consent not given
+        // Ensure Clarity doesn\'t load if consent not given
         window.clarity = window.clarity || function() {
-            // Store calls in queue but don't execute them
+            // Store calls in queue but don\'t execute them
             (window.clarity.q = window.clarity.q || []).push(arguments);
         };
-        window.clarity('consent', false);
+        sendClarityConsentSignal(false); // Send denied signal if not loading
     }
 }
 
@@ -4430,27 +4377,7 @@ function initializeClarity(consentGranted) {
 
 
 // Function to send consent signal to Microsoft Clarity
-function sendClarityConsentSignal(consentGranted) {
-    if (!config.clarityConfig.enabled || !config.clarityConfig.sendConsentSignal) return;
-    
-    try {
-        ensureClarityConsentSignal(consentGranted);
-        
-        // Enhanced logging
-        console.log('Microsoft Clarity consent signal sent:', consentGranted, 
-                   'for region:', locationData?.country || 'unknown');
-        
-        window.dataLayer.push({
-            'event': 'clarity_consent_signal',
-            'clarity_consent': consentGranted,
-            'clarity_region': locationData?.country || 'unknown',
-            'timestamp': new Date().toISOString(),
-            'location_data': locationData
-        });
-    } catch (error) {
-        console.error('Failed to send Clarity consent signal:', error);
-    }
-}
+
 
 
 
